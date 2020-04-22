@@ -1,66 +1,34 @@
-FROM dorowu/ubuntu-desktop-lxde-vnc:xenial
+FROM centos:8
 
-RUN mkdir /app
-WORKDIR /app
+RUN cd /etc/yum.repos.d && curl -O https://winswitch.org/downloads/CentOS/winswitch.repo && \
+    yum repolist && yum -y update && \
+    yum install -y dnf-plugins-core && \
+    yum config-manager -y --set-enabled PowerTools && \
+    yum install -y xpra xorg-x11-server-Xvfb xterm \
+                   java-1.8.0-openjdk \
+                   glibc.i686 glibc-devel.i686 libstdc++.i686 zlib-devel.i686 ncurses-devel.i686 \
+                   libX11-devel.i686 libXrender.i686 libXrandr.i686 \
+                   SDL2 libglvnd qt5-qtbase unzip pulseaudio-libs
 
-# Install tools and JDK
-RUN apt-get update \
-	&& apt-get install -y \
-	libgl1-mesa-dev \
-	wget \
-	unzip \
-	openjdk-8-jdk
-#	v4l2loopback
+# Configure Android SDK Environment
+ENV ANDROID_HOME /opt/android-sdk
+ENV ANDROID_SDK_ROOT ${ANDROID_HOME}
+ENV PATH $PATH:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+ENV LD_LIBRARY_PATH ${ANDROID_HOME}/emulator/lib64:${ANDROID_HOME}/emulator/lib64/qt/lib
 
-# Install and enable KVM
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
-	kvm qemu-kvm libvirt-bin bridge-utils libguestfs-tools
+# Installing Android SDK Commandline tools
+ARG CMD_TOOLS_VERSION="6200805"
+RUN curl "https://dl.google.com/android/repository/commandlinetools-linux-${CMD_TOOLS_VERSION}_latest.zip" --output commandlinetools.zip && \
+    unzip commandlinetools.zip -d $ANDROID_HOME && rm commandlinetools.zip
 
-RUN adduser `id -un` kvm \
-	&& newgrp kvm
+# Accept license and install required android SDK packages
+RUN yes | ${ANDROID_HOME}/tools/bin/sdkmanager "tools" "platform-tools" --sdk_root=${ANDROID_HOME}
 
-# Download Android SDK
-RUN wget -qO- http://dl.google.com/android/android-sdk_r23-linux.tgz | \
-	tar xvz -C /usr/local/ \
-	&& mv /usr/local/android-sdk-linux /usr/local/android-sdk \
-	&& chown -R root:root /usr/local/android-sdk/
 
-# Add android tools and platform tools to PATH
-ENV ANDROID_HOME /usr/local/android-sdk
-ENV PATH $PATH:$ANDROID_HOME/tools
-ENV PATH $PATH:$ANDROID_HOME/tools/bin
-ENV PATH $PATH:$ANDROID_HOME/platform-tools
+EXPOSE 10000
+EXPOSE 5037
 
-# Download Android SDK tools
-# TODO: can this process be simplified?
-RUN rm -rf ${ANDROID_HOME}/tools
-RUN wget https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip -P /app \
-	&& yes 'A' | unzip /app/sdk-tools-linux-4333796.zip -d ${ANDROID_HOME} \
-	&& yes | ${ANDROID_HOME}/tools/bin/sdkmanager \
-	"build-tools;28.0.2" "sources;android-26" "platform-tools" "platforms;android-26" "system-images;android-26;google_apis;x86"
-
-COPY supervisord.conf /etc/supervisor/conf.d
-COPY whatsapp.apk /app
-COPY start-avd.sh /app
-COPY avd.desktop /app
-
-RUN chmod +x /app/start-avd.sh
-RUN chmod +x /app/avd.desktop
-
-# Create directory to save AVD snapshots
-RUN mkdir -p /app/snapshots
-
-RUN mkdir -p /root/.config/autostart
-RUN cp /app/avd.desktop /root/.config/autostart
-RUN mkdir -p /root/Desktop
-RUN cp /app/avd.desktop /root/Desktop
-RUN echo '@sh /app/start-avd.sh' >> /etc/xdg/lxsession/LXDE/autostart
-
-ADD entrypoint.sh /app
-RUN chmod +x /app/entrypoint.sh
-CMD /app/entrypoint.sh
-
-#-camera-back webcam1 -no-boot-anim -no-snapshot-load
-#RUN adb install /app/whatsapp.apk
-
-#RUN modprobe v4l2loopback
+ADD whatsapp.apk .
+ADD install-wa.sh .
+ADD entrypoint.sh .
+CMD ./entrypoint.sh
